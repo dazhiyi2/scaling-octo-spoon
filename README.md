@@ -14,7 +14,7 @@ local themes = {
 }
 
 local main = ui.CreateLib(uiName, themes[7]); 
-local tab = main:NewTab("传送带一");
+local tab = main:NewTab("传送带");
 local tab2 = main:NewTab("选项二");
 local tab3 = main:NewTab("选项三");
 local tab4 = main:NewTab("选项四");
