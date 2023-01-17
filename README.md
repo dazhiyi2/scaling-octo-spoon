@@ -1,6 +1,6 @@
 local ui = loadstring(game:HttpGet("https://pastebin.com/raw/S4bCk6GT"))()
 
-local uiName = "你的脚本名称";
+local uiName = "Car Factory Tycoon! 作者:dazhiyi2";
 local themes = {
 [1] = "Serpent",
 [2] = "Synapse",
@@ -15,8 +15,8 @@ local themes = {
 
 local main = ui.CreateLib(uiName, themes[7]); 
 local tab = main:NewTab("传送带一");
-local tab2 = main:NewTab("选项二");
-local tab3 = main:NewTab("选项三");
+local tab2 = main:NewTab("传送带二");
+local tab3 = main:NewTab("传送带三");
 local tab4 = main:NewTab("选项四");
 
 
@@ -47,14 +47,56 @@ game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.D
 end)
 
 
-sec:NewButton("一个按钮两个功能","天堂制造", function()
-   local args = {
+local sec = tab2:NewSection('合集脚本', false);
+
+sec:NewButton("放金属","按钮说明", function()
+     local args = {
+    [1] = "Metal"
+}
+
+game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Collect:InvokeServer(unpack(args))local args = {
+    [1] = workspace.Tycoons.Yellow.Model.Lines.Conveyor2
+}
+
+game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Drop:InvokeServer(unpack(args))
+end)
+
+sec:NewButton("放玻璃","按钮说明", function()
+      local args = {
+    [1] = "Glass"
+}
+
+game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Collect:InvokeServer(unpack(args))local args = {
+    [1] = workspace.Tycoons.Yellow.Model.Lines.Conveyor2
+}
+
+game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Drop:InvokeServer(unpack(args))
+end)
+
+
+local sec = tab3:NewSection('合集脚本', false);
+
+sec:NewButton("放金属","按钮说明", function()
+    local args = {
     [1] = "Metal"
 }
 
 game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Collect:InvokeServer(unpack(args))
-local args = {
-    [1] = workspace.Tycoons.Yellow.Model.Lines.Conveyor1
+     local args = {
+    [1] = workspace.Tycoons.Red.Model.Lines.Conveyor3
+}
+
+game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Drop:InvokeServer(unpack(args))
+end)
+
+sec:NewButton("放玻璃","按钮说明", function()
+     local args = {
+    [1] = "Glass"
+}
+
+game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Collect:InvokeServer(unpack(args))
+     local args = {
+    [1] = workspace.Tycoons.Red.Model.Lines.Conveyor3
 }
 
 game:GetService("ReplicatedStorage").Packages.Knit.Services.MaterialService.RF.Drop:InvokeServer(unpack(args))
