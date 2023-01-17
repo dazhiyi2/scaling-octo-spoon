@@ -16,8 +16,6 @@ local themes = {
 local main = ui.CreateLib(uiName, themes[7]); 
 local tab = main:NewTab("第一页");
 local tab2 = main:NewTab("第二页");
-local tab3 = main:NewTab("第三页");
-local tab4 = main:NewTab("第四页");
 
 
 local sec = tab:NewSection('合集脚本', false);
@@ -184,5 +182,45 @@ sec:NewButton("汽车飞行","速度默认200", function()
 		BV.MaxForce = Vector3.new(math.huge,math.huge,math.huge)
 		BV.Velocity = game.Workspace.CurrentCamera.CFrame.LookVector * -Speed
 	end)
-	
+
+
+local sec = tab2:NewSection('合集脚本', false);
+
+sec:NewButton("飞行","按钮说明", function()
+
+     loadstring(game:HttpGet("https://raw.githubusercontent.com/dazhiyi2/scaling-octo-spoon/main/%E9%A3%9E%E8%A1%8C"))()
+end)
+
+sec:NewButton("键盘脚本","按钮说明", function()
+
+     loadstring(game:HttpGet("https://raw.githubusercontent.com/advxzivhsjjdhxhsidifvsh/mobkeyboard/main/main.txt", true))()
+end)
+
+sec:NewButton("修复卡视角","按钮说明", function()
+
+     local v1=game:GetService("Workspace");local v2=v1.CurrentCamera;v2.CameraType=Enum.CameraType["Watch"];task.wait();v2.CameraType=Enum.CameraType["Custom"];
+end)
+
+sec:NewButton("反挂机","按钮说明", function()
+
+     local function notify(title,text,icon,time)
+	game.StarterGui:SetCore("SendNotification", {
+		Title = title;
+		Text = text;
+		Icon = icon;
+		Duration = time
+	})
+end
+local function AntiAFK()
+    game:GetService('Players').LocalPlayer.Idled:Connect(function()
+        notify('反挂机', '反挂机已生效',nil, 4)
+        game:GetService('VirtualUser'):Button2Down(Vector2.new(0, 0), game:GetService('Workspace').CurrentCamera.CFrame);
+        wait(.325)
+        game:GetService('VirtualUser'):Button2Up(Vector2.new(0, 0), game:GetService('Workspace').CurrentCamera.CFrame);
+    end);
+end;
+AntiAFK();
+notify('反挂机', '反挂机已开启',nil, 4)
+end)
+
 	
