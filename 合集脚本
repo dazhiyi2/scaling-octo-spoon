@@ -15,7 +15,6 @@ local themes = {
 
 local main = ui.CreateLib(uiName, themes[7]); 
 local tab = main:NewTab("第一页");
-local tab2 = main:NewTab("第二页");
 
 
 local sec = tab:NewSection('合集脚本', false);
@@ -184,7 +183,6 @@ sec:NewButton("汽车飞行","速度默认200", function()
 	end)
      end)
 
-local sec = tab2:NewSection('合集脚本', false);
 
 sec:NewButton("飞行","按钮说明", function()
 
