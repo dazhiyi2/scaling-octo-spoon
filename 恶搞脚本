@@ -1,0 +1,9 @@
+local args = {
+
+    [1] = "h",
+
+    [2] = "All"
+
+}
+
+game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest"):FireServer(unpack(args))
