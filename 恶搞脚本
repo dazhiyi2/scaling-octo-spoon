@@ -1,6 +1,4 @@
-while task.wait() do
-
-—local args = {
+local args = {
 
     [1] = "我是男通",
 
@@ -9,5 +7,3 @@ while task.wait() do
 }
 
 game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest"):FireServer(unpack(args))
-
-end
