@@ -3,6 +3,7 @@
     功能：
     - 自瞄 (Aimbot): 支持侧键绑定、强度调节、FOV 调节、锁定部位切换
     - 静默自瞄 (Silent Aim): 视角不转动但逻辑锁定
+    - 扳机 (Trigger Bot): 准星对准敌人时自动开火，支持延迟调节
     - 掩体检测 (Wall Check): 防止隔墙锁定
     - 视觉 (Visuals): 实时 FOV 圆圈显示、敌人透视 (Highlight)
     - 团队检测: 可选过滤队友
@@ -18,8 +19,10 @@ local camera = workspace.CurrentCamera
 
 local SETTINGS = {
     AimbotEnabled = true,
-    SilentAim = false, -- 新增：静默自瞄
-    WallCheck = true,  -- 新增：掩体检测
+    SilentAim = false,
+    TriggerEnabled = false, -- 新增：扳机开关
+    TriggerDelay = 0.05,    -- 新增：扳机延迟
+    WallCheck = true,
     AimbotKey = Enum.UserInputType.MouseButton2,
     Smoothness = 0.2,
     FOV = 150,
@@ -52,7 +55,7 @@ MainFrame.Parent = ScreenGui
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
-MainFrame.Size = UDim2.new(0, 220, 0, 500) -- 增加高度以容纳新功能
+MainFrame.Size = UDim2.new(0, 220, 0, 500)
 MainFrame.ClipsDescendants = true
 
 local UICorner = Instance.new("UICorner")
@@ -70,7 +73,7 @@ Title.TextSize = 14
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Font = Enum.Font.GothamBold
 
--- 拖动支持
+-- 拖动支持逻辑
 local dragging, dragInput, dragStart, startPos
 MainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -99,7 +102,7 @@ Content.BackgroundTransparency = 1
 Content.Position = UDim2.new(0, 10, 0, 50)
 Content.Size = UDim2.new(1, -20, 1, -60)
 Content.ScrollBarThickness = 2
-Content.CanvasSize = UDim2.new(0, 0, 0, 650)
+Content.CanvasSize = UDim2.new(0, 0, 0, 750) -- 增加滚动高度
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = Content
@@ -162,8 +165,8 @@ local function createSlider(name, min, max, default, callback)
 
     local function update(input)
         local pos = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
-        local val = math.floor(min + (max - min) * pos)
-        if max <= 1 then val = min + (max - min) * pos end
+        local val = min + (max - min) * pos
+        if max > 1 then val = math.floor(val) end
         fill.Size = UDim2.new(pos, 0, 1, 0)
         label.Text = name .. ": " .. (max <= 1 and string.format("%.2f", val) or tostring(val))
         callback(val)
@@ -186,10 +189,10 @@ end
 -- UI 元素生成
 local aimBtn = createButton("自瞄: 开启", function() SETTINGS.AimbotEnabled = not SETTINGS.AimbotEnabled end)
 local silentAimBtn = createButton("静默自瞄: 关闭", function() SETTINGS.SilentAim = not SETTINGS.SilentAim end)
+local triggerBtn = createButton("扳机: 关闭", function() SETTINGS.TriggerEnabled = not SETTINGS.TriggerEnabled end)
 local wallCheckBtn = createButton("掩体检测: 开启", function() SETTINGS.WallCheck = not SETTINGS.WallCheck end)
 local teamBtn = createButton("团队检测: 开启", function() SETTINGS.TeamCheck = not SETTINGS.TeamCheck end)
 
--- 部位切换逻辑
 local partList = {"Head", "UpperTorso", "HumanoidRootPart"}
 local partDisplay = {["Head"] = "头部", ["UpperTorso"] = "躯干", ["HumanoidRootPart"] = "重心"}
 local currentPartIdx = 1
@@ -203,6 +206,7 @@ end)
 local bindBtn = createButton("自瞄热键: " .. SETTINGS.AimbotKey.Name, function() end)
 
 createSlider("自瞄强度 (平滑)", 0.01, 1, SETTINGS.Smoothness, function(v) SETTINGS.Smoothness = v end)
+createSlider("扳机延迟", 0, 1, SETTINGS.TriggerDelay, function(v) SETTINGS.TriggerDelay = v end)
 createSlider("FOV 范围", 10, 800, SETTINGS.FOV, function(v) SETTINGS.FOV = v end)
 
 local espBtn = createButton("透视: 开启", function() SETTINGS.ESPEnabled = not SETTINGS.ESPEnabled end)
@@ -245,6 +249,7 @@ local function isVisible(part)
     return not result
 end
 
+-- 获取最近玩家
 local function getClosestPlayer()
     local target, dist = nil, math.huge
     local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
@@ -272,43 +277,81 @@ local function getClosestPlayer()
     return target
 end
 
+-- 扳机检测逻辑
+local lastTriggerTime = 0
+local function executeTrigger()
+    if not SETTINGS.TriggerEnabled then return end
+    
+    local mousePos = UserInputService:GetMouseLocation()
+    local unitRay = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+    
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {lp.Character}
+    
+    local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, params)
+    
+    if result and result.Instance then
+        local hit = result.Instance
+        local model = hit:FindFirstAncestorOfClass("Model")
+        if model then
+            local player = Players:GetPlayerFromCharacter(model)
+            if player and player ~= lp and (not SETTINGS.TeamCheck or player.Team ~= lp.Team) then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    if tick() - lastTriggerTime > SETTINGS.TriggerDelay then
+                        -- 模拟点击 (使用注入器环境下的 mouse1click 或模拟事件)
+                        if mouse1click then
+                            mouse1click()
+                        elseif mouseclick then
+                            mouseclick()
+                        end
+                        lastTriggerTime = tick()
+                    end
+                end
+            end
+        end
+    end
+end
+
 RunService.RenderStepped:Connect(function()
-    -- 更新按钮状态颜色
+    -- 更新按钮 UI 状态
     aimBtn.TextColor3 = SETTINGS.AimbotEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
     aimBtn.Text = "自瞄: " .. (SETTINGS.AimbotEnabled and "开启" or "关闭")
-    
     silentAimBtn.TextColor3 = SETTINGS.SilentAim and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
     silentAimBtn.Text = "静默自瞄: " .. (SETTINGS.SilentAim and "开启" or "关闭")
+    triggerBtn.TextColor3 = SETTINGS.TriggerEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
+    triggerBtn.Text = "扳机: " .. (SETTINGS.TriggerEnabled and "开启" or "关闭")
     
     wallCheckBtn.Text = "掩体检测: " .. (SETTINGS.WallCheck and "开启" or "关闭")
     teamBtn.Text = "团队检测: " .. (SETTINGS.TeamCheck and "开启" or "关闭")
     espBtn.Text = "透视: " .. (SETTINGS.ESPEnabled and "开启" or "关闭")
     fovToggleBtn.Text = "显示 FOV 圆圈: " .. (SETTINGS.ShowFOV and "开启" or "关闭")
-    
     local dispName = partDisplay[SETTINGS.TargetPart] or "头部"
     partBtn.Text = "自瞄部位: " .. dispName
 
-    -- 更新 FOV 圆圈
+    -- 更新 FOV 圆圈渲染
     FOVCircle.Visible = SETTINGS.ShowFOV and MainFrame.Visible
     FOVCircle.Radius = SETTINGS.FOV
     FOVCircle.Position = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
 
-    -- 执行自瞄
+    -- 执行锁定逻辑
     local isPressed = (SETTINGS.AimbotKey.EnumType == Enum.UserInputType) and UserInputService:IsMouseButtonPressed(SETTINGS.AimbotKey) or UserInputService:IsKeyDown(SETTINGS.AimbotKey)
     
     if SETTINGS.AimbotEnabled and isPressed then
         local targetPart = getClosestPlayer()
         if targetPart then
-            if SETTINGS.SilentAim then
-                -- 静默自瞄通常需要修改网络包或攻击逻辑，这里作为UI演示预留
-            else
+            if not SETTINGS.SilentAim then
                 camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetPart.Position), SETTINGS.Smoothness)
             end
         end
     end
+    
+    -- 执行扳机逻辑
+    executeTrigger()
 end)
 
--- 透视逻辑
+-- 透视逻辑 (ESP)
 local function applyESP(player)
     if player == lp then return end
     local function createESP()
@@ -337,4 +380,4 @@ end
 for _, p in ipairs(Players:GetPlayers()) do applyESP(p) end
 Players.PlayerAdded:Connect(applyESP)
 
-warn("Modern Dark GUI Pro+ Loaded! [Insert] 键切换菜单。")
+warn("Modern Dark GUI Pro+ (Trigger Edition) Loaded! [Insert] 键切换菜单。")
