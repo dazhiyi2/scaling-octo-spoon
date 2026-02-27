@@ -1,13 +1,12 @@
 --[[
-    EXTREME COMBAT SUITE - 现代简约暗黑版 (Pro+)
+    EXTREME COMBAT SUITE - 稳定回滚版
     功能：
-    - 自瞄 (Aimbot): 支持侧键绑定、强度调节、FOV 调节、锁定部位切换
-    - 静默自瞄 (Silent Aim): 视角不转动但逻辑锁定
-    - 扳机 (Trigger Bot): 准星对准敌人时自动开火，支持延迟调节
-    - 掩体检测 (Wall Check): 防止隔墙锁定
-    - 视觉 (Visuals): 实时 FOV 圆圈显示、敌人透视 (Highlight)
-    - 团队检测: 可选过滤队友
-    - 现代 UI: 简约深色风格，支持拖动
+    - 自瞄 (Aimbot): 侧键绑定、平滑度调节
+    - 模拟静默 (Flick Trigger): 稳定一帧拉枪模式（已回滚至好用版本）
+    - 扳机 (Trigger Bot): 自动检测准星/Flick射击
+    - 团队检测 (Team Check): 修复后的全局过滤
+    - 视觉 (Visuals): FOV圆圈与ESP透视
+    - 现代 UI: 简约暗黑风格，支持拖动
 ]]
 
 local Players = game:GetService("Players")
@@ -20,8 +19,9 @@ local camera = workspace.CurrentCamera
 local SETTINGS = {
     AimbotEnabled = true,
     SilentAim = false,
-    TriggerEnabled = false, -- 新增：扳机开关
-    TriggerDelay = 0.05,    -- 新增：扳机延迟
+    TriggerEnabled = false,
+    FlickTrigger = false,
+    TriggerDelay = 0.05,
     WallCheck = true,
     AimbotKey = Enum.UserInputType.MouseButton2,
     Smoothness = 0.2,
@@ -55,7 +55,7 @@ MainFrame.Parent = ScreenGui
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
-MainFrame.Size = UDim2.new(0, 220, 0, 500)
+MainFrame.Size = UDim2.new(0, 220, 0, 520)
 MainFrame.ClipsDescendants = true
 
 local UICorner = Instance.new("UICorner")
@@ -67,7 +67,7 @@ Title.Parent = MainFrame
 Title.Size = UDim2.new(1, 0, 0, 40)
 Title.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 Title.BorderSizePixel = 0
-Title.Text = "  YYJ的器灵"
+Title.Text = "  YYJ的器灵 (回滚稳定版)"
 Title.TextColor3 = Color3.fromRGB(230, 230, 230)
 Title.TextSize = 14
 Title.TextXAlignment = Enum.TextXAlignment.Left
@@ -102,14 +102,13 @@ Content.BackgroundTransparency = 1
 Content.Position = UDim2.new(0, 10, 0, 50)
 Content.Size = UDim2.new(1, -20, 1, -60)
 Content.ScrollBarThickness = 2
-Content.CanvasSize = UDim2.new(0, 0, 0, 750) -- 增加滚动高度
+Content.CanvasSize = UDim2.new(0, 0, 0, 800)
 
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.Parent = Content
 UIListLayout.Padding = UDim.new(0, 8)
 UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
--- 辅助函数：创建按钮
 local function createButton(text, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, -5, 0, 35)
@@ -127,7 +126,6 @@ local function createButton(text, callback)
     return btn
 end
 
--- 辅助函数：创建滑块
 local function createSlider(name, min, max, default, callback)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1, -5, 0, 45)
@@ -186,9 +184,10 @@ local function createSlider(name, min, max, default, callback)
     end)
 end
 
--- UI 元素生成
+-- --- 按钮生成 ---
 local aimBtn = createButton("自瞄: 开启", function() SETTINGS.AimbotEnabled = not SETTINGS.AimbotEnabled end)
 local silentAimBtn = createButton("静默自瞄: 关闭", function() SETTINGS.SilentAim = not SETTINGS.SilentAim end)
+local flickBtn = createButton("模拟静默 (Flick): 关闭", function() SETTINGS.FlickTrigger = not SETTINGS.FlickTrigger end)
 local triggerBtn = createButton("扳机: 关闭", function() SETTINGS.TriggerEnabled = not SETTINGS.TriggerEnabled end)
 local wallCheckBtn = createButton("掩体检测: 开启", function() SETTINGS.WallCheck = not SETTINGS.WallCheck end)
 local teamBtn = createButton("团队检测: 开启", function() SETTINGS.TeamCheck = not SETTINGS.TeamCheck end)
@@ -212,7 +211,7 @@ createSlider("FOV 范围", 10, 800, SETTINGS.FOV, function(v) SETTINGS.FOV = v e
 local espBtn = createButton("透视: 开启", function() SETTINGS.ESPEnabled = not SETTINGS.ESPEnabled end)
 local fovToggleBtn = createButton("显示 FOV 圆圈: 开启", function() SETTINGS.ShowFOV = not SETTINGS.ShowFOV end)
 
--- 热键绑定逻辑
+-- 热键绑定
 local binding = false
 bindBtn.MouseButton1Click:Connect(function()
     binding = true
@@ -234,35 +233,25 @@ UserInputService.InputBegan:Connect(function(input)
     end
 end)
 
--- --- 核心逻辑函数 ---
+-- --- 核心逻辑 ---
 
--- 掩体检测
 local function isVisible(part)
     if not SETTINGS.WallCheck then return true end
-    local castPoints = {camera.CFrame.Position, part.Position}
-    local ignoreList = {lp.Character, part.Parent}
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = ignoreList
-    
-    local result = workspace:Raycast(castPoints[1], castPoints[2] - castPoints[1], params)
+    params.FilterDescendantsInstances = {lp.Character, part.Parent}
+    local result = workspace:Raycast(camera.CFrame.Position, part.Position - camera.CFrame.Position, params)
     return not result
 end
 
--- 获取最近玩家
 local function getClosestPlayer()
     local target, dist = nil, math.huge
     local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
     for _, v in ipairs(Players:GetPlayers()) do
         if v ~= lp and v.Character and v.Character:FindFirstChild("Humanoid") and v.Character.Humanoid.Health > 0 then
-            local partName = SETTINGS.TargetPart
-            if not v.Character:FindFirstChild(partName) then
-                partName = v.Character:FindFirstChild("Torso") and "Torso" or "Head"
-            end
-
             if SETTINGS.TeamCheck and v.Team == lp.Team then continue end
             
-            local targetPart = v.Character:FindFirstChild(partName)
+            local targetPart = v.Character:FindFirstChild(SETTINGS.TargetPart) or v.Character:FindFirstChild("HumanoidRootPart")
             if targetPart and isVisible(targetPart) then
                 local pos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
                 if onScreen then
@@ -277,37 +266,45 @@ local function getClosestPlayer()
     return target
 end
 
--- 扳机检测逻辑
+-- 稳定一帧延迟扳机模式
 local lastTriggerTime = 0
 local function executeTrigger()
     if not SETTINGS.TriggerEnabled then return end
     
-    local mousePos = UserInputService:GetMouseLocation()
-    local unitRay = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
-    
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {lp.Character}
-    
-    local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, params)
-    
-    if result and result.Instance then
-        local hit = result.Instance
-        local model = hit:FindFirstAncestorOfClass("Model")
-        if model then
-            local player = Players:GetPlayerFromCharacter(model)
-            if player and player ~= lp and (not SETTINGS.TeamCheck or player.Team ~= lp.Team) then
-                local hum = model:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    if tick() - lastTriggerTime > SETTINGS.TriggerDelay then
-                        -- 模拟点击 (使用注入器环境下的 mouse1click 或模拟事件)
-                        if mouse1click then
-                            mouse1click()
-                        elseif mouseclick then
-                            mouseclick()
-                        end
-                        lastTriggerTime = tick()
-                    end
+    if SETTINGS.FlickTrigger then
+        local target = getClosestPlayer()
+        if target then
+            local originalCF = camera.CFrame
+            -- 1. 拉枪
+            camera.CFrame = CFrame.new(camera.CFrame.Position, target.Position)
+            
+            -- 2. 开火判定
+            if tick() - lastTriggerTime > SETTINGS.TriggerDelay then
+                if mouse1click then mouse1click() elseif mouseclick then mouseclick() end
+                lastTriggerTime = tick()
+            end
+            
+            -- 3. 稳定回滚的关键：等待下一帧再还原视角，确保游戏捕捉到准星停留
+            RunService.RenderStepped:Wait() 
+            camera.CFrame = originalCF
+        end
+    else
+        -- 普通模式
+        local mousePos = UserInputService:GetMouseLocation()
+        local unitRay = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {lp.Character}
+        local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, params)
+        
+        if result and result.Instance then
+            local model = result.Instance:FindFirstAncestorOfClass("Model")
+            local p = model and Players:GetPlayerFromCharacter(model)
+            if p and p ~= lp then
+                if SETTINGS.TeamCheck and p.Team == lp.Team then return end
+                if tick() - lastTriggerTime > SETTINGS.TriggerDelay then
+                    if mouse1click then mouse1click() elseif mouseclick then mouseclick() end
+                    lastTriggerTime = tick()
                 end
             end
         end
@@ -315,69 +312,69 @@ local function executeTrigger()
 end
 
 RunService.RenderStepped:Connect(function()
-    -- 更新按钮 UI 状态
-    aimBtn.TextColor3 = SETTINGS.AimbotEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
+    -- UI 状态同步
     aimBtn.Text = "自瞄: " .. (SETTINGS.AimbotEnabled and "开启" or "关闭")
-    silentAimBtn.TextColor3 = SETTINGS.SilentAim and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
+    aimBtn.TextColor3 = SETTINGS.AimbotEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
     silentAimBtn.Text = "静默自瞄: " .. (SETTINGS.SilentAim and "开启" or "关闭")
-    triggerBtn.TextColor3 = SETTINGS.TriggerEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
+    silentAimBtn.TextColor3 = SETTINGS.SilentAim and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
+    flickBtn.Text = "模拟静默 (Flick): " .. (SETTINGS.FlickTrigger and "开启" or "关闭")
+    flickBtn.TextColor3 = SETTINGS.FlickTrigger and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
     triggerBtn.Text = "扳机: " .. (SETTINGS.TriggerEnabled and "开启" or "关闭")
+    triggerBtn.TextColor3 = SETTINGS.TriggerEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
     
     wallCheckBtn.Text = "掩体检测: " .. (SETTINGS.WallCheck and "开启" or "关闭")
     teamBtn.Text = "团队检测: " .. (SETTINGS.TeamCheck and "开启" or "关闭")
     espBtn.Text = "透视: " .. (SETTINGS.ESPEnabled and "开启" or "关闭")
     fovToggleBtn.Text = "显示 FOV 圆圈: " .. (SETTINGS.ShowFOV and "开启" or "关闭")
-    local dispName = partDisplay[SETTINGS.TargetPart] or "头部"
-    partBtn.Text = "自瞄部位: " .. dispName
+    partBtn.Text = "自瞄部位: " .. (partDisplay[SETTINGS.TargetPart] or "头部")
 
-    -- 更新 FOV 圆圈渲染
+    -- FOV 渲染
     FOVCircle.Visible = SETTINGS.ShowFOV and MainFrame.Visible
     FOVCircle.Radius = SETTINGS.FOV
     FOVCircle.Position = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
 
-    -- 执行锁定逻辑
-    local isPressed = (SETTINGS.AimbotKey.EnumType == Enum.UserInputType) and UserInputService:IsMouseButtonPressed(SETTINGS.AimbotKey) or UserInputService:IsKeyDown(SETTINGS.AimbotKey)
-    
-    if SETTINGS.AimbotEnabled and isPressed then
-        local targetPart = getClosestPlayer()
-        if targetPart then
-            if not SETTINGS.SilentAim then
+    -- 常规自瞄逻辑
+    if not SETTINGS.FlickTrigger then
+        local isPressed = (SETTINGS.AimbotKey.EnumType == Enum.UserInputType) and UserInputService:IsMouseButtonPressed(SETTINGS.AimbotKey) or UserInputService:IsKeyDown(SETTINGS.AimbotKey)
+        if SETTINGS.AimbotEnabled and isPressed then
+            local targetPart = getClosestPlayer()
+            if targetPart and not SETTINGS.SilentAim then
                 camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetPart.Position), SETTINGS.Smoothness)
             end
         end
     end
     
-    -- 执行扳机逻辑
     executeTrigger()
 end)
 
--- 透视逻辑 (ESP)
+-- --- ESP 透视模块 ---
 local function applyESP(player)
     if player == lp then return end
-    local function createESP()
+    local function updateESP()
         if not player.Character then return end
-        local h = player.Character:FindFirstChild("ExtremeESP") or Instance.new("Highlight")
-        h.Name = "ExtremeESP"
-        h.Parent = player.Character
-        h.Enabled = SETTINGS.ESPEnabled
-        h.FillColor = (player.Team == lp.Team) and Color3.new(0, 1, 0) or Color3.new(1, 0.2, 0.2)
-        h.OutlineColor = Color3.new(1, 1, 1)
-        h.FillTransparency = 0.5
-    end
-    player.CharacterAdded:Connect(function() task.wait(0.5); createESP() end)
-    createESP()
-    RunService.Heartbeat:Connect(function()
-        if player.Character then
-            local h = player.Character:FindFirstChild("ExtremeESP")
-            if h then 
-                h.Enabled = SETTINGS.ESPEnabled 
-                h.FillColor = (player.Team == lp.Team) and Color3.new(0, 1, 0) or Color3.new(1, 0.2, 0.2)
+        local h = player.Character:FindFirstChild("ExtremeESP")
+        local shouldShow = SETTINGS.ESPEnabled
+        if SETTINGS.TeamCheck and player.Team == lp.Team then shouldShow = false end
+        
+        if shouldShow then
+            if not h then
+                h = Instance.new("Highlight")
+                h.Name = "ExtremeESP"
+                h.Parent = player.Character
+                h.OutlineColor = Color3.new(1, 1, 1)
+                h.FillTransparency = 0.5
             end
+            h.Enabled = true
+            h.FillColor = (player.Team == lp.Team) and Color3.new(0, 1, 0) or Color3.new(1, 0.2, 0.2)
+        else
+            if h then h.Enabled = false end
         end
-    end)
+    end
+    player.CharacterAdded:Connect(function() task.wait(0.5); updateESP() end)
+    RunService.Heartbeat:Connect(updateESP)
 end
 
 for _, p in ipairs(Players:GetPlayers()) do applyESP(p) end
 Players.PlayerAdded:Connect(applyESP)
 
-warn("Modern Dark GUI Pro+ (Trigger Edition) Loaded! [Insert] 键切换菜单。")
+warn("稳定回滚版已加载。模拟静默功能已恢复一帧等待逻辑，以确保命中判定。")
