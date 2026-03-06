@@ -1,263 +1,230 @@
---[[
-    EXTREME COMBAT SUITE - 稳定回滚版
-    功能：
-    - 自瞄 (Aimbot): 侧键绑定、平滑度调节
-    - 模拟静默 (Flick Trigger): 稳定一帧拉枪模式（已回滚至好用版本）
-    - 扳机 (Trigger Bot): 自动检测准星/Flick射击
-    - 团队检测 (Team Check): 修复后的全局过滤
-    - 视觉 (Visuals): FOV圆圈与ESP透视
-    - 现代 UI: 简约暗黑风格，支持拖动
-]]
+-- LUA.OS - FPS EXTREME SUITE (V12.2 INDEPENDENT FLICK ENGINE)
+-- 修复 Flick 自动回拉机制，使其成为独立功能
+
+if getgenv().LUA_OS_LOADED then
+    local oldGui = game:GetService("CoreGui"):FindFirstChild("LUA_OS_GUI")
+    if oldGui then oldGui:Destroy() end
+end
+getgenv().LUA_OS_LOADED = true
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
 local lp = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-local SETTINGS = {
+-- --- 全局配置 ---
+getgenv().SETTINGS = {
     AimbotEnabled = true,
-    SilentAim = false,
-    TriggerEnabled = false,
-    FlickTrigger = false,
-    TriggerDelay = 0.05,
-    WallCheck = true,
-    AimbotKey = Enum.UserInputType.MouseButton2,
-    Smoothness = 0.2,
+    FlickTrigger = false,   
+    TriggerBot = false,     
+    Smoothness = 15,
     FOV = 150,
+    WallCheck = true,
     ShowFOV = true,
-    ESPEnabled = true,
     TeamCheck = true,
+    ChamsEnabled = true,
+    VisibleColor = Color3.fromRGB(255, 0, 0),
+    HiddenColor = Color3.fromRGB(255, 255, 255),
     TargetPart = "Head",
+    AimbotKey = Enum.UserInputType.MouseButton2,
     MenuKey = Enum.KeyCode.Insert
 }
 
--- --- FOV 预览圆圈 ---
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 1
-FOVCircle.NumSides = 100
-FOVCircle.Radius = SETTINGS.FOV
-FOVCircle.Filled = false
-FOVCircle.Visible = SETTINGS.ShowFOV
-FOVCircle.Color = Color3.fromRGB(255, 255, 255)
-FOVCircle.Transparency = 0.5
+local OriginalCFrame = nil 
+local IsFlicking = false
+local IsBinding = false
+local BindingTarget = nil 
+local LastFlickTime = 0
 
--- --- 现代 UI 组件库 ---
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ModernCombatGui"
-ScreenGui.Parent = (gethui and gethui()) or CoreGui
-ScreenGui.ResetOnSpawn = false
-
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
-MainFrame.Size = UDim2.new(0, 220, 0, 520)
-MainFrame.ClipsDescendants = true
-
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
-
-local Title = Instance.new("TextLabel")
-Title.Parent = MainFrame
-Title.Size = UDim2.new(1, 0, 0, 40)
-Title.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-Title.BorderSizePixel = 0
-Title.Text = "  YYJ的器灵 (回滚稳定版)"
-Title.TextColor3 = Color3.fromRGB(230, 230, 230)
-Title.TextSize = 14
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Font = Enum.Font.GothamBold
-
--- 拖动支持逻辑
-local dragging, dragInput, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-    end
-end)
-MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-end)
-
-local Content = Instance.new("ScrollingFrame")
-Content.Name = "Content"
-Content.Parent = MainFrame
-Content.BackgroundTransparency = 1
-Content.Position = UDim2.new(0, 10, 0, 50)
-Content.Size = UDim2.new(1, -20, 1, -60)
-Content.ScrollBarThickness = 2
-Content.CanvasSize = UDim2.new(0, 0, 0, 800)
-
-local UIListLayout = Instance.new("UIListLayout")
-UIListLayout.Parent = Content
-UIListLayout.Padding = UDim.new(0, 8)
-UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local function createButton(text, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, -5, 0, 35)
-    btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    btn.BorderSizePixel = 0
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 12
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 4)
-    corner.Parent = btn
-    btn.MouseButton1Click:Connect(callback)
-    btn.Parent = Content
-    return btn
+-- --- 工具函数 ---
+local function GetKeyName(enum)
+    if not enum then return "NONE" end
+    local s = tostring(enum):split(".")
+    return s[#s] or "UNKNOWN"
 end
 
-local function createSlider(name, min, max, default, callback)
-    local container = Instance.new("Frame")
-    container.Size = UDim2.new(1, -5, 0, 45)
-    container.BackgroundTransparency = 1
-    container.Parent = Content
+local function SmoothTween(obj, goal, t)
+    local info = TweenInfo.new(t or 0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(obj, info, goal)
+    tween:Play()
+    return tween
+end
 
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 0, 20)
-    label.BackgroundTransparency = 1
-    label.Text = name .. ": " .. default
-    label.TextColor3 = Color3.fromRGB(180, 180, 180)
-    label.Font = Enum.Font.Gotham
-    label.TextSize = 11
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = container
+-- --- 绘图初始化 ---
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 1
+FOVCircle.Filled = false
+FOVCircle.Transparency = 1
+FOVCircle.Color = Color3.new(1, 1, 1)
 
-    local bg = Instance.new("Frame")
-    bg.Size = UDim2.new(1, 0, 0, 6)
-    bg.Position = UDim2.new(0, 0, 0, 25)
-    bg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    bg.BorderSizePixel = 0
-    bg.Parent = container
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 3)
-    corner.Parent = bg
+-- --- UI 构建 ---
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
+ScreenGui.Name = "LUA_OS_GUI"
+ScreenGui.ResetOnSpawn = false
 
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    fill.BorderSizePixel = 0
-    fill.Parent = bg
-    local corner2 = Instance.new("UICorner")
-    corner2.CornerRadius = UDim.new(0, 3)
-    corner2.Parent = fill
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 620, 0, 520)
+MainFrame.Position = UDim2.new(0.5, -310, 0.5, -260)
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+MainFrame.BorderSizePixel = 0
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 16)
+local Stroke = Instance.new("UIStroke", MainFrame)
+Stroke.Color = Color3.new(1,1,1); Stroke.Transparency = 0.9
 
-    local function update(input)
-        local pos = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
-        local val = min + (max - min) * pos
-        if max > 1 then val = math.floor(val) end
-        fill.Size = UDim2.new(pos, 0, 1, 0)
-        label.Text = name .. ": " .. (max <= 1 and string.format("%.2f", val) or tostring(val))
-        callback(val)
+-- 侧边栏
+local Sidebar = Instance.new("Frame", MainFrame)
+Sidebar.Size = UDim2.new(0, 180, 1, 0)
+Sidebar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Sidebar.BorderSizePixel = 0
+Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 16)
+
+local Logo = Instance.new("TextLabel", Sidebar)
+Logo.Text = "LUA.OS"
+Logo.Font = Enum.Font.GothamBold
+Logo.TextColor3 = Color3.new(1, 1, 1); Logo.TextSize = 22
+Logo.Size = UDim2.new(1, 0, 0, 80); Logo.BackgroundTransparency = 1
+
+-- 内容区
+local Content = Instance.new("Frame", MainFrame)
+Content.Position = UDim2.new(0, 180, 0, 0)
+Content.Size = UDim2.new(1, -180, 1, 0)
+Content.BackgroundTransparency = 1
+
+local TabTitle = Instance.new("TextLabel", Content)
+TabTitle.Size = UDim2.new(1, -60, 0, 60); TabTitle.Position = UDim2.new(0, 30, 0, 10)
+TabTitle.Text = "COMBAT"; TabTitle.Font = Enum.Font.GothamBold; TabTitle.TextColor3 = Color3.new(0.6, 0.6, 0.6); TabTitle.TextSize = 12; TabTitle.TextXAlignment = Enum.TextXAlignment.Left; TabTitle.BackgroundTransparency = 1
+
+local Scroll = Instance.new("ScrollingFrame", Content)
+Scroll.Size = UDim2.new(1, -40, 1, -80); Scroll.Position = UDim2.new(0, 20, 0, 70)
+Scroll.BackgroundTransparency = 1; Scroll.ScrollBarThickness = 0; Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local Layout = Instance.new("UIListLayout", Scroll); Layout.Padding = UDim.new(0, 8)
+
+-- --- UI 组件 (保持不变) ---
+local function CreateToggle(name, setting, parent)
+    local Frame = Instance.new("Frame", parent)
+    Frame.Size = UDim2.new(1, 0, 0, 55); Frame.BackgroundColor3 = Color3.new(1, 1, 1); Frame.BackgroundTransparency = 0.97
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+    local Label = Instance.new("TextLabel", Frame)
+    Label.Size = UDim2.new(0.7, 0, 1, 0); Label.Position = UDim2.new(0, 15, 0, 0)
+    Label.Text = name; Label.Font = Enum.Font.GothamMedium; Label.TextColor3 = Color3.new(1, 1, 1); Label.TextSize = 13; Label.TextXAlignment = Enum.TextXAlignment.Left; Label.BackgroundTransparency = 1
+    local Switch = Instance.new("TextButton", Frame)
+    Switch.Size = UDim2.new(0, 40, 0, 20); Switch.Position = UDim2.new(1, -55, 0.5, -10); Switch.Text = ""; Switch.AutoButtonColor = false
+    Instance.new("UICorner", Switch).CornerRadius = UDim.new(1, 0)
+    local Dot = Instance.new("Frame", Switch)
+    Dot.Size = UDim2.new(0, 14, 0, 14); Dot.Position = UDim2.new(0, 3, 0.5, -7); Dot.BackgroundColor3 = Color3.new(1, 1, 1); Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
+    local function Refresh()
+        local active = getgenv().SETTINGS[setting]
+        SmoothTween(Switch, {BackgroundColor3 = active and Color3.new(1, 1, 1) or Color3.fromRGB(45, 45, 45)})
+        SmoothTween(Dot, {
+            Position = active and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7),
+            BackgroundColor3 = active and Color3.new(0, 0, 0) or Color3.new(0.6, 0.6, 0.6)
+        })
     end
+    Switch.MouseButton1Click:Connect(function() getgenv().SETTINGS[setting] = not getgenv().SETTINGS[setting]; Refresh() end)
+    Refresh()
+end
 
-    bg.InputBegan:Connect(function(input)
+local function CreateSlider(name, setting, min, max, parent)
+    local Frame = Instance.new("Frame", parent)
+    Frame.Size = UDim2.new(1, 0, 0, 65); Frame.BackgroundColor3 = Color3.new(1,1,1); Frame.BackgroundTransparency = 0.97
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+    local Label = Instance.new("TextLabel", Frame)
+    Label.Size = UDim2.new(1, -20, 0, 30); Label.Position = UDim2.new(0, 15, 0, 5)
+    Label.Text = name .. ": " .. tostring(getgenv().SETTINGS[setting]); Label.Font = Enum.Font.GothamMedium; Label.TextColor3 = Color3.new(1,1,1); Label.TextSize = 12; Label.TextXAlignment = Enum.TextXAlignment.Left; Label.BackgroundTransparency = 1
+    local Track = Instance.new("Frame", Frame)
+    Track.Size = UDim2.new(1, -30, 0, 4); Track.Position = UDim2.new(0, 15, 0, 45); Track.BackgroundColor3 = Color3.new(1, 1, 1); Track.BackgroundTransparency = 0.9
+    Instance.new("UICorner", Track)
+    local Fill = Instance.new("Frame", Track)
+    Fill.Size = UDim2.new((getgenv().SETTINGS[setting] - min) / (max - min), 0, 1, 0); Fill.BackgroundColor3 = Color3.new(1, 1, 1); Instance.new("UICorner", Fill)
+    Track.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local connection
-            connection = UserInputService.InputChanged:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseMovement then update(input) end
+            local move = UserInputService.InputChanged:Connect(function(m)
+                if m.UserInputType == Enum.UserInputType.MouseMovement then
+                    local pos = math.clamp((m.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
+                    local val = math.floor(min + (max - min) * pos)
+                    getgenv().SETTINGS[setting] = val
+                    Fill.Size = UDim2.new(pos, 0, 1, 0); Label.Text = name .. ": " .. tostring(val)
+                end
             end)
-            update(input)
-            UserInputService.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then connection:Disconnect() end
+            local endcon; endcon = UserInputService.InputEnded:Connect(function(e)
+                if e.UserInputType == Enum.UserInputType.MouseButton1 then move:Disconnect(); endcon:Disconnect() end
             end)
         end
     end)
 end
 
--- --- 按钮生成 ---
-local aimBtn = createButton("自瞄: 开启", function() SETTINGS.AimbotEnabled = not SETTINGS.AimbotEnabled end)
-local silentAimBtn = createButton("静默自瞄: 关闭", function() SETTINGS.SilentAim = not SETTINGS.SilentAim end)
-local flickBtn = createButton("模拟静默 (Flick): 关闭", function() SETTINGS.FlickTrigger = not SETTINGS.FlickTrigger end)
-local triggerBtn = createButton("扳机: 关闭", function() SETTINGS.TriggerEnabled = not SETTINGS.TriggerEnabled end)
-local wallCheckBtn = createButton("掩体检测: 开启", function() SETTINGS.WallCheck = not SETTINGS.WallCheck end)
-local teamBtn = createButton("团队检测: 开启", function() SETTINGS.TeamCheck = not SETTINGS.TeamCheck end)
-
-local partList = {"Head", "UpperTorso", "HumanoidRootPart"}
-local partDisplay = {["Head"] = "头部", ["UpperTorso"] = "躯干", ["HumanoidRootPart"] = "重心"}
-local currentPartIdx = 1
-
-local partBtn = createButton("自瞄部位: 头部", function()
-    currentPartIdx = currentPartIdx + 1
-    if currentPartIdx > #partList then currentPartIdx = 1 end
-    SETTINGS.TargetPart = partList[currentPartIdx]
-end)
-
-local bindBtn = createButton("自瞄热键: " .. SETTINGS.AimbotKey.Name, function() end)
-
-createSlider("自瞄强度 (平滑)", 0.01, 1, SETTINGS.Smoothness, function(v) SETTINGS.Smoothness = v end)
-createSlider("扳机延迟", 0, 1, SETTINGS.TriggerDelay, function(v) SETTINGS.TriggerDelay = v end)
-createSlider("FOV 范围", 10, 800, SETTINGS.FOV, function(v) SETTINGS.FOV = v end)
-
-local espBtn = createButton("透视: 开启", function() SETTINGS.ESPEnabled = not SETTINGS.ESPEnabled end)
-local fovToggleBtn = createButton("显示 FOV 圆圈: 开启", function() SETTINGS.ShowFOV = not SETTINGS.ShowFOV end)
-
--- 热键绑定
-local binding = false
-bindBtn.MouseButton1Click:Connect(function()
-    binding = true
-    bindBtn.Text = "...按下按键/侧键..."
-end)
-
-UserInputService.InputBegan:Connect(function(input)
-    if binding then
-        binding = false
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            SETTINGS.AimbotKey = input.KeyCode
-            bindBtn.Text = "自瞄热键: " .. input.KeyCode.Name
-        else
-            SETTINGS.AimbotKey = input.UserInputType
-            bindBtn.Text = "自瞄热键: " .. input.UserInputType.Name
+local function CreateKeybind(name, setting, parent)
+    local Frame = Instance.new("Frame", parent)
+    Frame.Size = UDim2.new(1, 0, 0, 55); Frame.BackgroundColor3 = Color3.new(1,1,1); Frame.BackgroundTransparency = 0.97
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+    local Label = Instance.new("TextLabel", Frame)
+    Label.Size = UDim2.new(1, -120, 1, 0); Label.Position = UDim2.new(0, 15, 0, 0); Label.Text = name; Label.Font = Enum.Font.GothamMedium; Label.TextColor3 = Color3.new(1, 1, 1); Label.TextSize = 13; Label.TextXAlignment = Enum.TextXAlignment.Left; Label.BackgroundTransparency = 1
+    local BindBtn = Instance.new("TextButton", Frame)
+    BindBtn.Size = UDim2.new(0, 95, 0, 30); BindBtn.Position = UDim2.new(1, -110, 0.5, -15)
+    BindBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30); BindBtn.Text = GetKeyName(getgenv().SETTINGS[setting]); BindBtn.Font = Enum.Font.GothamBold; BindBtn.TextColor3 = Color3.new(0.8, 0.8, 0.8); BindBtn.TextSize = 11
+    Instance.new("UICorner", BindBtn).CornerRadius = UDim.new(0, 6)
+    BindBtn.MouseButton1Click:Connect(function()
+        if IsBinding then return end
+        IsBinding = true; BindingTarget = setting; BindBtn.Text = "..."; BindBtn.TextColor3 = Color3.new(1, 1, 0)
+    end)
+    RunService.Heartbeat:Connect(function()
+        if not IsBinding or BindingTarget ~= setting then
+            BindBtn.Text = GetKeyName(getgenv().SETTINGS[setting])
+            BindBtn.TextColor3 = Color3.new(0.8, 0.8, 0.8)
         end
-    elseif input.KeyCode == SETTINGS.MenuKey then
-        MainFrame.Visible = not MainFrame.Visible
-    end
-end)
-
--- --- 核心逻辑 ---
-
-local function isVisible(part)
-    if not SETTINGS.WallCheck then return true end
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {lp.Character, part.Parent}
-    local result = workspace:Raycast(camera.CFrame.Position, part.Position - camera.CFrame.Position, params)
-    return not result
+    end)
 end
 
-local function getClosestPlayer()
+local function CreateSelector(name, setting, options, parent)
+    local Frame = Instance.new("Frame", parent)
+    Frame.Size = UDim2.new(1, 0, 0, 55); Frame.BackgroundColor3 = Color3.new(1, 1, 1); Frame.BackgroundTransparency = 0.97
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+    local Label = Instance.new("TextLabel", Frame)
+    Label.Size = UDim2.new(0.6, 0, 1, 0); Label.Position = UDim2.new(0, 15, 0, 0)
+    Label.Text = name; Label.Font = Enum.Font.GothamMedium; Label.TextColor3 = Color3.new(1, 1, 1); Label.TextSize = 13; Label.TextXAlignment = Enum.TextXAlignment.Left; Label.BackgroundTransparency = 1
+    local Btn = Instance.new("TextButton", Frame)
+    Btn.Size = UDim2.new(0, 110, 0, 30); Btn.Position = UDim2.new(1, -125, 0.5, -15)
+    Btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30); Btn.Text = tostring(getgenv().SETTINGS[setting]); Btn.Font = Enum.Font.GothamBold; Btn.TextColor3 = Color3.new(1, 1, 1); Btn.TextSize = 11
+    Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
+    local currentIndex = 1
+    for i, v in ipairs(options) do if v == getgenv().SETTINGS[setting] then currentIndex = i end end
+    Btn.MouseButton1Click:Connect(function()
+        currentIndex = (currentIndex % #options) + 1
+        getgenv().SETTINGS[setting] = options[currentIndex]
+        Btn.Text = tostring(options[currentIndex])
+    end)
+end
+
+-- --- 核心功能 (可见性检测) ---
+local function IsVisible(part, targetCharacter)
+    local ignoreList = {camera, lp.Character, targetCharacter}
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = ignoreList
+    rayParams.IgnoreWater = true
+    local origin = camera.CFrame.Position
+    local direction = (part.Position - origin).Unit * (part.Position - origin).Magnitude
+    local result = workspace:Raycast(origin, direction, rayParams)
+    return result == nil
+end
+
+local function GetClosestTarget()
     local target, dist = nil, math.huge
-    local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
-    for _, v in ipairs(Players:GetPlayers()) do
-        if v ~= lp and v.Character and v.Character:FindFirstChild("Humanoid") and v.Character.Humanoid.Health > 0 then
-            if SETTINGS.TeamCheck and v.Team == lp.Team then continue end
-            
-            local targetPart = v.Character:FindFirstChild(SETTINGS.TargetPart) or v.Character:FindFirstChild("HumanoidRootPart")
-            if targetPart and isVisible(targetPart) then
-                local pos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+    local center = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= lp and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            if getgenv().SETTINGS.TeamCheck and player.Team == lp.Team then continue end
+            local p = player.Character:FindFirstChild(getgenv().SETTINGS.TargetPart)
+            if p then
+                local pos, onScreen = camera:WorldToViewportPoint(p.Position)
                 if onScreen then
                     local mag = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-                    if mag < dist and mag < SETTINGS.FOV then
-                        target = targetPart; dist = mag
+                    if mag < getgenv().SETTINGS.FOV then
+                        if getgenv().SETTINGS.WallCheck and not IsVisible(p, player.Character) then continue end
+                        if mag < dist then target = p; dist = mag end
                     end
                 end
             end
@@ -266,115 +233,139 @@ local function getClosestPlayer()
     return target
 end
 
--- 稳定一帧延迟扳机模式
-local lastTriggerTime = 0
-local function executeTrigger()
-    if not SETTINGS.TriggerEnabled then return end
-    
-    if SETTINGS.FlickTrigger then
-        local target = getClosestPlayer()
-        if target then
-            local originalCF = camera.CFrame
-            -- 1. 拉枪
-            camera.CFrame = CFrame.new(camera.CFrame.Position, target.Position)
-            
-            -- 2. 开火判定
-            if tick() - lastTriggerTime > SETTINGS.TriggerDelay then
-                if mouse1click then mouse1click() elseif mouseclick then mouseclick() end
-                lastTriggerTime = tick()
+-- --- 独立 FLICK 引擎与自瞄循环 ---
+RunService.PreRender:Connect(function()
+    FOVCircle.Visible = getgenv().SETTINGS.ShowFOV
+    FOVCircle.Radius = getgenv().SETTINGS.FOV
+    FOVCircle.Position = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
+
+    local aimKey = getgenv().SETTINGS.AimbotKey
+    local isPressed = (tostring(aimKey):find("MouseButton") and UserInputService:IsMouseButtonPressed(aimKey)) or UserInputService:IsKeyDown(aimKey)
+
+    -- 独立判断 FLICK
+    if getgenv().SETTINGS.FlickTrigger and isPressed then
+        if not IsFlicking then
+            local target = GetClosestTarget()
+            if target then
+                IsFlicking = true
+                OriginalCFrame = camera.CFrame -- 记录这一瞬间的精确视角
+                
+                -- 1. 执行甩枪
+                camera.CFrame = CFrame.lookAt(camera.CFrame.Position, target.Position)
+                
+                -- 2. 执行击发
+                mouse1press()
+                task.wait(0.01) -- 极短延迟确保引擎判定击中
+                mouse1release()
+                
+                -- 3. 强制回拉视角 (关键点：不等待按键释放，直接回拉)
+                camera.CFrame = OriginalCFrame
+                
+                -- 4. 冷却防止连发抖动
+                task.delay(0.1, function()
+                    IsFlicking = false
+                end)
             end
-            
-            -- 3. 稳定回滚的关键：等待下一帧再还原视角，确保游戏捕捉到准星停留
-            RunService.RenderStepped:Wait() 
-            camera.CFrame = originalCF
         end
-    else
-        -- 普通模式
-        local mousePos = UserInputService:GetMouseLocation()
-        local unitRay = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = {lp.Character}
-        local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, params)
-        
-        if result and result.Instance then
-            local model = result.Instance:FindFirstAncestorOfClass("Model")
-            local p = model and Players:GetPlayerFromCharacter(model)
-            if p and p ~= lp then
-                if SETTINGS.TeamCheck and p.Team == lp.Team then return end
-                if tick() - lastTriggerTime > SETTINGS.TriggerDelay then
-                    if mouse1click then mouse1click() elseif mouseclick then mouseclick() end
-                    lastTriggerTime = tick()
+        return -- 如果执行了 Flick，直接跳过后续普通自瞄逻辑
+    end
+
+    -- 普通自瞄逻辑 (仅在 Flick 未激活或未锁定目标时运行)
+    if getgenv().SETTINGS.AimbotEnabled and isPressed and not IsFlicking then
+        local target = GetClosestTarget()
+        if target then
+            local smooth = 1 - (getgenv().SETTINGS.Smoothness / 105)
+            camera.CFrame = camera.CFrame:Lerp(CFrame.lookAt(camera.CFrame.Position, target.Position), smooth)
+            
+            if getgenv().SETTINGS.TriggerBot then
+                local mouseRay = camera:ViewportPointToRay(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
+                local result = workspace:Raycast(mouseRay.Origin, mouseRay.Direction * 1000)
+                if result and result.Instance:IsDescendantOf(target.Parent) then
+                    mouse1press()
+                    task.wait(0.01)
+                    mouse1release()
                 end
             end
         end
     end
-end
-
-RunService.RenderStepped:Connect(function()
-    -- UI 状态同步
-    aimBtn.Text = "自瞄: " .. (SETTINGS.AimbotEnabled and "开启" or "关闭")
-    aimBtn.TextColor3 = SETTINGS.AimbotEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
-    silentAimBtn.Text = "静默自瞄: " .. (SETTINGS.SilentAim and "开启" or "关闭")
-    silentAimBtn.TextColor3 = SETTINGS.SilentAim and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
-    flickBtn.Text = "模拟静默 (Flick): " .. (SETTINGS.FlickTrigger and "开启" or "关闭")
-    flickBtn.TextColor3 = SETTINGS.FlickTrigger and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
-    triggerBtn.Text = "扳机: " .. (SETTINGS.TriggerEnabled and "开启" or "关闭")
-    triggerBtn.TextColor3 = SETTINGS.TriggerEnabled and Color3.fromRGB(0, 255, 150) or Color3.fromRGB(200, 80, 80)
-    
-    wallCheckBtn.Text = "掩体检测: " .. (SETTINGS.WallCheck and "开启" or "关闭")
-    teamBtn.Text = "团队检测: " .. (SETTINGS.TeamCheck and "开启" or "关闭")
-    espBtn.Text = "透视: " .. (SETTINGS.ESPEnabled and "开启" or "关闭")
-    fovToggleBtn.Text = "显示 FOV 圆圈: " .. (SETTINGS.ShowFOV and "开启" or "关闭")
-    partBtn.Text = "自瞄部位: " .. (partDisplay[SETTINGS.TargetPart] or "头部")
-
-    -- FOV 渲染
-    FOVCircle.Visible = SETTINGS.ShowFOV and MainFrame.Visible
-    FOVCircle.Radius = SETTINGS.FOV
-    FOVCircle.Position = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
-
-    -- 常规自瞄逻辑
-    if not SETTINGS.FlickTrigger then
-        local isPressed = (SETTINGS.AimbotKey.EnumType == Enum.UserInputType) and UserInputService:IsMouseButtonPressed(SETTINGS.AimbotKey) or UserInputService:IsKeyDown(SETTINGS.AimbotKey)
-        if SETTINGS.AimbotEnabled and isPressed then
-            local targetPart = getClosestPlayer()
-            if targetPart and not SETTINGS.SilentAim then
-                camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetPart.Position), SETTINGS.Smoothness)
-            end
-        end
-    end
-    
-    executeTrigger()
 end)
 
--- --- ESP 透视模块 ---
-local function applyESP(player)
-    if player == lp then return end
-    local function updateESP()
-        if not player.Character then return end
-        local h = player.Character:FindFirstChild("ExtremeESP")
-        local shouldShow = SETTINGS.ESPEnabled
-        if SETTINGS.TeamCheck and player.Team == lp.Team then shouldShow = false end
-        
-        if shouldShow then
+-- --- 透视与热能颜色动态更新 (保持不变) ---
+RunService.Heartbeat:Connect(function()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == lp or not player.Character then continue end
+        local isEnemy = not (getgenv().SETTINGS.TeamCheck and player.Team == lp.Team)
+        local h = player.Character:FindFirstChild("LUA_Chams")
+        if getgenv().SETTINGS.ChamsEnabled and isEnemy and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
             if not h then
-                h = Instance.new("Highlight")
-                h.Name = "ExtremeESP"
-                h.Parent = player.Character
-                h.OutlineColor = Color3.new(1, 1, 1)
-                h.FillTransparency = 0.5
+                h = Instance.new("Highlight", player.Character); h.Name = "LUA_Chams"
+                h.FillTransparency = 0.5; h.OutlineTransparency = 0
+            end
+            local head = player.Character:FindFirstChild("Head")
+            if head then
+                local visible = IsVisible(head, player.Character)
+                h.FillColor = visible and getgenv().SETTINGS.VisibleColor or getgenv().SETTINGS.HiddenColor
+                h.OutlineColor = visible and getgenv().SETTINGS.VisibleColor or getgenv().SETTINGS.HiddenColor
             end
             h.Enabled = true
-            h.FillColor = (player.Team == lp.Team) and Color3.new(0, 1, 0) or Color3.new(1, 0.2, 0.2)
-        else
-            if h then h.Enabled = false end
+        elseif h then 
+            h.Enabled = false 
         end
     end
-    player.CharacterAdded:Connect(function() task.wait(0.5); updateESP() end)
-    RunService.Heartbeat:Connect(updateESP)
+end)
+
+-- --- 页面与按钮管理 ---
+local function LoadTab(id)
+    for _, v in pairs(Scroll:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
+    TabTitle.Text = id:upper()
+    if id == "Combat" then
+        CreateToggle("开启自瞄 (AIMBOT)", "AimbotEnabled", Scroll)
+        CreateSelector("锁定部位 (TARGET)", "TargetPart", {"Head", "HumanoidRootPart"}, Scroll)
+        CreateToggle("掩体检查 (WALL CHECK)", "WallCheck", Scroll)
+        CreateToggle("模拟静默甩枪 (FLICK)", "FlickTrigger", Scroll)
+        CreateToggle("自动扳机 (TRIGGER)", "TriggerBot", Scroll)
+        CreateSlider("自瞄范围 (FOV)", "FOV", 30, 800, Scroll)
+        CreateSlider("平滑速度 (SMOOTH)", "Smoothness", 0, 100, Scroll)
+        CreateKeybind("自瞄热键", "AimbotKey", Scroll)
+        CreateKeybind("菜单热键", "MenuKey", Scroll)
+    elseif id == "Visuals" then
+        CreateToggle("显示自瞄圈 (FOV)", "ShowFOV", Scroll)
+        CreateToggle("智能热能 (DYNAMIC CHAMS)", "ChamsEnabled", Scroll)
+        CreateToggle("团队检查 (TEAM)", "TeamCheck", Scroll)
+    end
 end
 
-for _, p in ipairs(Players:GetPlayers()) do applyESP(p) end
-Players.PlayerAdded:Connect(applyESP)
+local function SidebarBtn(name, id, y)
+    local B = Instance.new("TextButton", Sidebar)
+    B.Size = UDim2.new(1, -20, 0, 40); B.Position = UDim2.new(0, 10, 0, y); B.BackgroundTransparency = 1; B.Text = name; B.Font = Enum.Font.GothamMedium; B.TextColor3 = Color3.new(0.6, 0.6, 0.6); B.TextSize = 13
+    B.MouseButton1Click:Connect(function()
+        for _, x in pairs(Sidebar:GetChildren()) do if x:IsA("TextButton") then x.TextColor3 = Color3.new(0.6,0.6,0.6) end end
+        B.TextColor3 = Color3.new(1,1,1); LoadTab(id)
+    end)
+end
 
-warn("稳定回滚版已加载。模拟静默功能已恢复一帧等待逻辑，以确保命中判定。")
+SidebarBtn("战斗增强", "Combat", 100); SidebarBtn("视觉增强", "Visuals", 150)
+LoadTab("Combat")
+
+-- 全局热键监听
+UserInputService.InputBegan:Connect(function(input)
+    if IsBinding then
+        local key = (input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode) or input.UserInputType
+        if key ~= Enum.KeyCode.Unknown and key ~= Enum.UserInputType.MouseMovement then
+            getgenv().SETTINGS[BindingTarget] = key; IsBinding = false; BindingTarget = nil
+        end
+    elseif input.KeyCode == getgenv().SETTINGS.MenuKey then
+        MainFrame.Visible = not MainFrame.Visible
+    end
+end)
+
+-- 拖拽支持
+local drag, dStart, sPos
+MainFrame.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = true; dStart = i.Position; sPos = MainFrame.Position end end)
+UserInputService.InputChanged:Connect(function(i) if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+    local delta = i.Position - dStart
+    MainFrame.Position = UDim2.new(sPos.X.Scale, sPos.X.Offset + delta.X, sPos.Y.Scale, sPos.Y.Offset + delta.Y)
+end end)
+UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end end)
+
+print("LUA.OS V12.2 READY: FLICK IS NOW INDEPENDENT AND AUTO-RESTORES.")
