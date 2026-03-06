@@ -1,5 +1,5 @@
--- LUA.OS - FPS EXTREME SUITE (V12.2 INDEPENDENT FLICK ENGINE)
--- 修复 Flick 自动回拉机制，使其成为独立功能
+-- LUA.OS - FPS EXTREME SUITE (V12.3 TARGET FOCUS EDITION)
+-- Fixed Flick rollback, added permanent pink highlight for target focus and embedded UI user panel.
 
 if getgenv().LUA_OS_LOADED then
     local oldGui = game:GetService("CoreGui"):FindFirstChild("LUA_OS_GUI")
@@ -15,7 +15,7 @@ local TweenService = game:GetService("TweenService")
 local lp = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- --- 全局配置 ---
+-- --- Global Settings ---
 getgenv().SETTINGS = {
     AimbotEnabled = true,
     FlickTrigger = false,   
@@ -26,8 +26,9 @@ getgenv().SETTINGS = {
     ShowFOV = true,
     TeamCheck = true,
     ChamsEnabled = true,
-    VisibleColor = Color3.fromRGB(255, 0, 0),
-    HiddenColor = Color3.fromRGB(255, 255, 255),
+    VisibleColor = Color3.fromRGB(255, 0, 0), -- Visible enemy color
+    HiddenColor = Color3.fromRGB(255, 255, 255), -- Occluded enemy color
+    TargetColor = Color3.fromRGB(255, 150, 200), -- Target focus color (Pink)
     TargetPart = "Head",
     AimbotKey = Enum.UserInputType.MouseButton2,
     MenuKey = Enum.KeyCode.Insert
@@ -37,9 +38,9 @@ local OriginalCFrame = nil
 local IsFlicking = false
 local IsBinding = false
 local BindingTarget = nil 
-local LastFlickTime = 0
+local CurrentTarget = nil -- Tracks the closest player in FOV in real-time
 
--- --- 工具函数 ---
+-- --- Utility Functions ---
 local function GetKeyName(enum)
     if not enum then return "NONE" end
     local s = tostring(enum):split(".")
@@ -53,18 +54,19 @@ local function SmoothTween(obj, goal, t)
     return tween
 end
 
--- --- 绘图初始化 ---
+-- --- Drawing Initialization ---
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 1
 FOVCircle.Filled = false
 FOVCircle.Transparency = 1
 FOVCircle.Color = Color3.new(1, 1, 1)
 
--- --- UI 构建 ---
+-- --- UI Construction ---
 local ScreenGui = Instance.new("ScreenGui", CoreGui)
 ScreenGui.Name = "LUA_OS_GUI"
 ScreenGui.ResetOnSpawn = false
 
+-- Main Container
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 620, 0, 520)
 MainFrame.Position = UDim2.new(0.5, -310, 0.5, -260)
@@ -74,12 +76,33 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 16)
 local Stroke = Instance.new("UIStroke", MainFrame)
 Stroke.Color = Color3.new(1,1,1); Stroke.Transparency = 0.9
 
--- 侧边栏
+-- Sidebar
 local Sidebar = Instance.new("Frame", MainFrame)
 Sidebar.Size = UDim2.new(0, 180, 1, 0)
 Sidebar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 Sidebar.BorderSizePixel = 0
 Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 16)
+
+-- User Information Panel (Embedded in Sidebar)
+local UserPanel = Instance.new("Frame", Sidebar)
+UserPanel.Size = UDim2.new(1, -20, 0, 60)
+UserPanel.Position = UDim2.new(0, 10, 1, -70)
+UserPanel.BackgroundTransparency = 1
+
+local AvatarImg = Instance.new("ImageLabel", UserPanel)
+AvatarImg.Size = UDim2.new(0, 40, 0, 40)
+AvatarImg.Position = UDim2.new(0, 5, 0.5, -20)
+AvatarImg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+AvatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. lp.UserId .. "&w=150&h=150"
+Instance.new("UICorner", AvatarImg).CornerRadius = UDim.new(1, 0)
+
+local DisplayName = Instance.new("TextLabel", UserPanel)
+DisplayName.Size = UDim2.new(1, -55, 0, 18); DisplayName.Position = UDim2.new(0, 55, 0.5, -18)
+DisplayName.Text = lp.DisplayName; DisplayName.Font = Enum.Font.GothamBold; DisplayName.TextColor3 = Color3.new(1, 1, 1); DisplayName.TextSize = 13; DisplayName.TextXAlignment = Enum.TextXAlignment.Left; DisplayName.BackgroundTransparency = 1
+
+local UserName = Instance.new("TextLabel", UserPanel)
+UserName.Size = UDim2.new(1, -55, 0, 15); UserName.Position = UDim2.new(0, 55, 0.5, 2)
+UserName.Text = "@" .. lp.Name; UserName.Font = Enum.Font.GothamMedium; UserName.TextColor3 = Color3.new(0.5, 0.5, 0.5); UserName.TextSize = 11; UserName.TextXAlignment = Enum.TextXAlignment.Left; UserName.BackgroundTransparency = 1
 
 local Logo = Instance.new("TextLabel", Sidebar)
 Logo.Text = "LUA.OS"
@@ -87,7 +110,7 @@ Logo.Font = Enum.Font.GothamBold
 Logo.TextColor3 = Color3.new(1, 1, 1); Logo.TextSize = 22
 Logo.Size = UDim2.new(1, 0, 0, 80); Logo.BackgroundTransparency = 1
 
--- 内容区
+-- Content Area
 local Content = Instance.new("Frame", MainFrame)
 Content.Position = UDim2.new(0, 180, 0, 0)
 Content.Size = UDim2.new(1, -180, 1, 0)
@@ -102,7 +125,7 @@ Scroll.Size = UDim2.new(1, -40, 1, -80); Scroll.Position = UDim2.new(0, 20, 0, 7
 Scroll.BackgroundTransparency = 1; Scroll.ScrollBarThickness = 0; Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 local Layout = Instance.new("UIListLayout", Scroll); Layout.Padding = UDim.new(0, 8)
 
--- --- UI 组件 (保持不变) ---
+-- --- UI Components ---
 local function CreateToggle(name, setting, parent)
     local Frame = Instance.new("Frame", parent)
     Frame.Size = UDim2.new(1, 0, 0, 55); Frame.BackgroundColor3 = Color3.new(1, 1, 1); Frame.BackgroundTransparency = 0.97
@@ -156,7 +179,7 @@ local function CreateSlider(name, setting, min, max, parent)
     end)
 end
 
-local function CreateKeybind(name, setting, parent)
+local function CreateKeybind(name, parent, setting)
     local Frame = Instance.new("Frame", parent)
     Frame.Size = UDim2.new(1, 0, 0, 55); Frame.BackgroundColor3 = Color3.new(1,1,1); Frame.BackgroundTransparency = 0.97
     Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
@@ -198,7 +221,7 @@ local function CreateSelector(name, setting, options, parent)
     end)
 end
 
--- --- 核心功能 (可见性检测) ---
+-- --- Core Features (Visibility & Targeting) ---
 local function IsVisible(part, targetCharacter)
     local ignoreList = {camera, lp.Character, targetCharacter}
     local rayParams = RaycastParams.new()
@@ -233,7 +256,7 @@ local function GetClosestTarget()
     return target
 end
 
--- --- 独立 FLICK 引擎与自瞄循环 ---
+-- --- Flick Engine & Aimbot Loop ---
 RunService.PreRender:Connect(function()
     FOVCircle.Visible = getgenv().SETTINGS.ShowFOV
     FOVCircle.Radius = getgenv().SETTINGS.FOV
@@ -242,45 +265,37 @@ RunService.PreRender:Connect(function()
     local aimKey = getgenv().SETTINGS.AimbotKey
     local isPressed = (tostring(aimKey):find("MouseButton") and UserInputService:IsMouseButtonPressed(aimKey)) or UserInputService:IsKeyDown(aimKey)
 
-    -- 独立判断 FLICK
+    -- Real-time targeting (Highlighting without keypress)
+    local closestTarget = GetClosestTarget()
+    CurrentTarget = closestTarget and closestTarget.Parent or nil
+
+    -- Flick Logic
     if getgenv().SETTINGS.FlickTrigger and isPressed then
         if not IsFlicking then
-            local target = GetClosestTarget()
-            if target then
+            if closestTarget then
                 IsFlicking = true
-                OriginalCFrame = camera.CFrame -- 记录这一瞬间的精确视角
-                
-                -- 1. 执行甩枪
-                camera.CFrame = CFrame.lookAt(camera.CFrame.Position, target.Position)
-                
-                -- 2. 执行击发
+                OriginalCFrame = camera.CFrame
+                camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closestTarget.Position)
                 mouse1press()
-                task.wait(0.01) -- 极短延迟确保引擎判定击中
+                task.wait(0.01)
                 mouse1release()
-                
-                -- 3. 强制回拉视角 (关键点：不等待按键释放，直接回拉)
                 camera.CFrame = OriginalCFrame
-                
-                -- 4. 冷却防止连发抖动
-                task.delay(0.1, function()
-                    IsFlicking = false
-                end)
+                task.delay(0.1, function() IsFlicking = false end)
             end
         end
-        return -- 如果执行了 Flick，直接跳过后续普通自瞄逻辑
+        return
     end
 
-    -- 普通自瞄逻辑 (仅在 Flick 未激活或未锁定目标时运行)
+    -- Regular Aimbot Logic
     if getgenv().SETTINGS.AimbotEnabled and isPressed and not IsFlicking then
-        local target = GetClosestTarget()
-        if target then
+        if closestTarget then
             local smooth = 1 - (getgenv().SETTINGS.Smoothness / 105)
-            camera.CFrame = camera.CFrame:Lerp(CFrame.lookAt(camera.CFrame.Position, target.Position), smooth)
+            camera.CFrame = camera.CFrame:Lerp(CFrame.lookAt(camera.CFrame.Position, closestTarget.Position), smooth)
             
             if getgenv().SETTINGS.TriggerBot then
                 local mouseRay = camera:ViewportPointToRay(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
                 local result = workspace:Raycast(mouseRay.Origin, mouseRay.Direction * 1000)
-                if result and result.Instance:IsDescendantOf(target.Parent) then
+                if result and result.Instance:IsDescendantOf(closestTarget.Parent) then
                     mouse1press()
                     task.wait(0.01)
                     mouse1release()
@@ -290,22 +305,32 @@ RunService.PreRender:Connect(function()
     end
 end)
 
--- --- 透视与热能颜色动态更新 (保持不变) ---
+-- --- Dynamic Visuals (Pink Focus Highlight) ---
 RunService.Heartbeat:Connect(function()
     for _, player in pairs(Players:GetPlayers()) do
         if player == lp or not player.Character then continue end
         local isEnemy = not (getgenv().SETTINGS.TeamCheck and player.Team == lp.Team)
         local h = player.Character:FindFirstChild("LUA_Chams")
+        
         if getgenv().SETTINGS.ChamsEnabled and isEnemy and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
             if not h then
                 h = Instance.new("Highlight", player.Character); h.Name = "LUA_Chams"
                 h.FillTransparency = 0.5; h.OutlineTransparency = 0
             end
+            
             local head = player.Character:FindFirstChild("Head")
             if head then
                 local visible = IsVisible(head, player.Character)
-                h.FillColor = visible and getgenv().SETTINGS.VisibleColor or getgenv().SETTINGS.HiddenColor
-                h.OutlineColor = visible and getgenv().SETTINGS.VisibleColor or getgenv().SETTINGS.HiddenColor
+                local baseCol = visible and getgenv().SETTINGS.VisibleColor or getgenv().SETTINGS.HiddenColor
+                
+                -- Target Focus logic: If player is the closest in FOV, color them Pink permanently
+                if CurrentTarget and CurrentTarget == player.Character then
+                    h.FillColor = getgenv().SETTINGS.TargetColor
+                    h.OutlineColor = getgenv().SETTINGS.TargetColor
+                else
+                    h.FillColor = baseCol
+                    h.OutlineColor = baseCol
+                end
             end
             h.Enabled = true
         elseif h then 
@@ -314,7 +339,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- --- 页面与按钮管理 ---
+-- --- Menu Management ---
 local function LoadTab(id)
     for _, v in pairs(Scroll:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
     TabTitle.Text = id:upper()
@@ -326,8 +351,8 @@ local function LoadTab(id)
         CreateToggle("自动扳机 (TRIGGER)", "TriggerBot", Scroll)
         CreateSlider("自瞄范围 (FOV)", "FOV", 30, 800, Scroll)
         CreateSlider("平滑速度 (SMOOTH)", "Smoothness", 0, 100, Scroll)
-        CreateKeybind("自瞄热键", "AimbotKey", Scroll)
-        CreateKeybind("菜单热键", "MenuKey", Scroll)
+        CreateKeybind("自瞄热键", Scroll, "AimbotKey")
+        CreateKeybind("菜单热键", Scroll, "MenuKey")
     elseif id == "Visuals" then
         CreateToggle("显示自瞄圈 (FOV)", "ShowFOV", Scroll)
         CreateToggle("智能热能 (DYNAMIC CHAMS)", "ChamsEnabled", Scroll)
@@ -347,7 +372,7 @@ end
 SidebarBtn("战斗增强", "Combat", 100); SidebarBtn("视觉增强", "Visuals", 150)
 LoadTab("Combat")
 
--- 全局热键监听
+-- Global Input Listeners
 UserInputService.InputBegan:Connect(function(input)
     if IsBinding then
         local key = (input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode) or input.UserInputType
@@ -359,7 +384,7 @@ UserInputService.InputBegan:Connect(function(input)
     end
 end)
 
--- 拖拽支持
+-- Drag Support
 local drag, dStart, sPos
 MainFrame.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = true; dStart = i.Position; sPos = MainFrame.Position end end)
 UserInputService.InputChanged:Connect(function(i) if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
@@ -368,4 +393,4 @@ UserInputService.InputChanged:Connect(function(i) if drag and i.UserInputType ==
 end end)
 UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end end)
 
-print("LUA.OS V12.2 READY: FLICK IS NOW INDEPENDENT AND AUTO-RESTORES.")
+print("LUA.OS V12.3 READY: ALWAYS-ON TARGET PREVIEW ACTIVE.")
